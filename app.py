@@ -4,15 +4,11 @@ import numpy as np
 import cv2
 
 from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-from streamlit_webrtc import (
-    webrtc_streamer,
-    VideoTransformerBase
-)
-
-# --------------------------------------------------
+# ==================================================
 # PAGE CONFIG
-# --------------------------------------------------
+# ==================================================
 
 st.set_page_config(
     page_title="Face Emotion Recognition",
@@ -20,9 +16,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# --------------------------------------------------
+# ==================================================
+# CUSTOM CSS
+# ==================================================
+
+st.markdown("""
+<style>
+.big-font {
+    font-size:28px !important;
+    font-weight:bold;
+    color:#00D4FF;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ==================================================
 # LOAD MODEL
-# --------------------------------------------------
+# ==================================================
 
 @st.cache_resource
 def load_model():
@@ -30,11 +40,15 @@ def load_model():
         "deep_cnn_model.keras"
     )
 
-model = load_model()
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"Model Loading Error: {e}")
+    st.stop()
 
-# --------------------------------------------------
+# ==================================================
 # CLASS NAMES
-# --------------------------------------------------
+# ==================================================
 
 class_names = [
     "angry",
@@ -46,30 +60,40 @@ class_names = [
     "surprise"
 ]
 
-# --------------------------------------------------
+# ==================================================
 # FACE DETECTOR
-# --------------------------------------------------
+# ==================================================
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades +
     "haarcascade_frontalface_default.xml"
 )
 
-# --------------------------------------------------
+# ==================================================
 # PREDICTION FUNCTION
-# --------------------------------------------------
+# ==================================================
 
-def predict_emotion(face_gray):
+def predict_emotion(face):
 
-    face_gray = cv2.resize(
-        face_gray,
+    # Ensure grayscale
+    if len(face.shape) == 3:
+        face = cv2.cvtColor(
+            face,
+            cv2.COLOR_BGR2GRAY
+        )
+
+    # Resize exactly like training
+    face = cv2.resize(
+        face,
         (48, 48)
     )
 
+    face = face.astype(np.float32)
+
     face_input = np.expand_dims(
-        face_gray,
+        face,
         axis=(0, -1)
-    ).astype("float32")
+    )
 
     prediction = model.predict(
         face_input,
@@ -77,67 +101,81 @@ def predict_emotion(face_gray):
     )
 
     emotion_index = np.argmax(
-        prediction
+        prediction[0]
+    )
+
+    confidence = (
+        np.max(prediction[0]) * 100
     )
 
     emotion = class_names[
         emotion_index
     ]
 
-    confidence = (
-        np.max(prediction) * 100
-    )
-
     return (
         emotion,
         confidence,
-        prediction[0]
+        prediction[0],
+        face
     )
 
-# --------------------------------------------------
+# ==================================================
 # HEADER
-# --------------------------------------------------
-
-st.title(
-    "😊 Face Emotion Recognition"
-)
+# ==================================================
 
 st.markdown(
-    "Upload an image or use your webcam for live emotion detection."
+    '<p class="big-font">😊 Face Emotion Recognition</p>',
+    unsafe_allow_html=True
 )
 
-# --------------------------------------------------
+st.write(
+    "Detect emotions from uploaded images or live webcam."
+)
+
+# ==================================================
 # SIDEBAR
-# --------------------------------------------------
+# ==================================================
+
+st.sidebar.header("Options")
 
 mode = st.sidebar.radio(
-    "Choose Mode",
+    "Select Mode",
     [
         "Upload Image",
         "Live Camera"
     ]
 )
 
+st.sidebar.info(
+    """
+    Supported emotions:
+    
+    • Angry  
+    • Disgust  
+    • Fear  
+    • Happy  
+    • Neutral  
+    • Sad  
+    • Surprise
+    """
+)
+
 # ==================================================
-# IMAGE MODE
+# IMAGE UPLOAD MODE
 # ==================================================
 
 if mode == "Upload Image":
 
     uploaded_file = st.file_uploader(
         "Upload an Image",
-        type=[
-            "jpg",
-            "jpeg",
-            "png"
-        ]
+        type=["jpg", "jpeg", "png"]
     )
 
     if uploaded_file:
 
         image = Image.open(
             uploaded_file
-        )
+        ).convert("RGB")
 
         frame = np.array(image)
 
@@ -161,6 +199,8 @@ if mode == "Upload Image":
 
         else:
 
+            result_col1, result_col2 = st.columns(2)
+
             for (
                 x,
                 y,
@@ -173,10 +213,14 @@ if mode == "Upload Image":
                     x:x+w
                 ]
 
-                emotion, confidence, probs = (
-                    predict_emotion(face)
-                )
+                (
+                    emotion,
+                    confidence,
+                    probs,
+                    processed_face
+                ) = predict_emotion(face)
 
+                # Bounding box
                 cv2.rectangle(
                     frame,
                     (x, y),
@@ -187,7 +231,7 @@ if mode == "Upload Image":
 
                 cv2.putText(
                     frame,
-                    f"{emotion} {confidence:.1f}%",
+                    f"{emotion} ({confidence:.1f}%)",
                     (x, y-10),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
@@ -195,34 +239,41 @@ if mode == "Upload Image":
                     2
                 )
 
-            st.image(
-                frame,
-                use_container_width=True
-            )
+            with result_col1:
 
-            st.success(
-                f"Detected Emotion: {emotion}"
-            )
+                st.image(
+                    frame,
+                    caption="Detected Faces",
+                    use_container_width=True
+                )
 
-            st.write(
-                f"Confidence: {confidence:.2f}%"
-            )
+            with result_col2:
+
+                st.image(
+                    processed_face,
+                    caption="Face Sent To Model",
+                    width=250
+                )
+
+                st.success(
+                    f"Emotion: {emotion}"
+                )
+
+                st.write(
+                    f"Confidence: {confidence:.2f}%"
+                )
 
             st.subheader(
                 "Emotion Probabilities"
             )
 
-            prob_dict = {}
-
-            for i in range(
-                len(class_names)
-            ):
-
-                prob_dict[
-                    class_names[i]
-                ] = float(
-                    probs[i] * 100
+            prob_dict = {
+                class_names[i]:
+                float(probs[i] * 100)
+                for i in range(
+                    len(class_names)
                 )
+            }
 
             st.bar_chart(
                 prob_dict
@@ -235,7 +286,7 @@ if mode == "Upload Image":
 if mode == "Live Camera":
 
     st.subheader(
-        "Live Emotion Detection"
+        "📷 Live Emotion Detection"
     )
 
     class EmotionDetector(
@@ -275,7 +326,7 @@ if mode == "Live Camera":
                     x:x+w
                 ]
 
-                emotion, confidence, _ = (
+                emotion, confidence, _, _ = (
                     predict_emotion(face)
                 )
 
@@ -300,7 +351,7 @@ if mode == "Live Camera":
             return img
 
     webrtc_streamer(
-        key="emotion-detection",
+        key="emotion-camera",
         video_transformer_factory=
         EmotionDetector
     )
