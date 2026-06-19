@@ -1,5 +1,5 @@
 import streamlit as st
-import tensorflow as tf
+import keras
 import numpy as np
 import cv2
 
@@ -36,8 +36,9 @@ st.markdown("""
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model(
-        "deep_cnn_model.keras"
+    return keras.models.load_model(
+        "deep_cnn_model.keras",
+        compile=False
     )
 
 try:
